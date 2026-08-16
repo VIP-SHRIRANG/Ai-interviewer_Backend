@@ -1,79 +1,132 @@
-const SentenceBuffer =
-    require("../utils/sentenceBuffer");
-
 class InterviewService {
 
-    constructor(llmService, ttsService) {
-
-        this.llmService =
-            llmService;
-
-        this.ttsService =
-            ttsService;
-    }
-
-    async processQuestion(
-        question,
-        onAudio,
-        signal
+    constructor(
+        questionService,
+        interviewSession
     ) {
 
-        const sentenceBuffer =
-            new SentenceBuffer();
+        this.questionService =
+            questionService;
 
-        let completeAnswer = "";
-
-
-        await this.llmService.generateAnswer(
-
-            question,
-
-            async token => {
-
-                completeAnswer += token;
-
-                const sentence =
-                    sentenceBuffer.add(token);
-
-                if (!sentence) {
-                    return;
-                }
-
-                const audio =
-                    await this.ttsService.speak(
-                        sentence
-                    );
-
-                await onAudio(
-                    audio,
-                    sentence
-                );
-            },
-
-            signal
-        );
+        this.interviewSession =
+            interviewSession;
+    }
 
 
-        const remaining =
-            sentenceBuffer.flush();
+    async startInterview(
+        onAudio
+    ) {
+
+        const session =
+            this.interviewSession
+                .createSession();
 
 
-        if (remaining) {
-
-            const audio =
-                await this.ttsService.speak(
-                    remaining
+        const question =
+            await this.questionService
+                .generateQuestion(
+                    1,
+                    onAudio
                 );
 
-            await onAudio(
-                audio,
-                remaining
+
+        this.interviewSession
+            .setQuestion(
+                session.sessionId,
+                question
+            );
+
+
+        return {
+
+            sessionId:
+                session.sessionId,
+
+            question:
+                question,
+
+            questionNumber:
+                session.questionNumber
+        };
+    }
+
+
+    async processAnswer(
+        sessionId,
+        answer,
+        onAudio
+    ) {
+
+        const session =
+            this.interviewSession
+                .getSession(
+                    sessionId
+                );
+
+
+        if (!session) {
+
+            throw new Error(
+                "Interview session not found"
             );
         }
 
 
-        return completeAnswer;
+        const previousQuestion =
+            session.currentQuestion;
+
+
+        // Store answer
+
+        this.interviewSession
+            .addAnswer(
+                sessionId,
+                answer
+            );
+
+
+        const nextQuestionNumber =
+            session.questionNumber + 1;
+
+
+        // Generate next question
+
+        const nextQuestion =
+            await this.questionService
+                .generateNextQuestion(
+
+                    previousQuestion,
+
+                    answer,
+
+                    nextQuestionNumber,
+
+                    onAudio
+                );
+
+
+        // Update session
+
+        this.interviewSession
+            .setQuestion(
+                sessionId,
+                nextQuestion
+            );
+
+
+        return {
+
+            sessionId,
+
+            question:
+                nextQuestion,
+
+            questionNumber:
+                session.questionNumber
+        };
     }
 }
 
-module.exports = InterviewService;
+
+module.exports =
+    InterviewService;

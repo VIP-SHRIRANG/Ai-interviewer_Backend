@@ -1,21 +1,115 @@
 class InterviewController {
 
     constructor(interviewService) {
+
         this.interviewService =
             interviewService;
     }
 
-    submit = async (req, res) => {
+
+    start = async (req, res) => {
 
         try {
 
-            const question =
-                req.body.question;
+            res.setHeader(
+                "Content-Type",
+                "text/event-stream"
+            );
 
-            if (!question?.trim()) {
+            res.setHeader(
+                "Cache-Control",
+                "no-cache"
+            );
+
+            res.setHeader(
+                "Connection",
+                "keep-alive"
+            );
+
+            res.flushHeaders();
+
+
+            const result =
+                await this.interviewService
+                    .startInterview(
+
+                        async (audio, text) => {
+
+                            res.write(
+                                `data: ${JSON.stringify({
+                                    type: "audio",
+                                    text: text,
+                                    audio:
+                                        audio.toString(
+                                            "base64"
+                                        )
+                                })}\n\n`
+                            );
+                        }
+                    );
+
+
+            res.write(
+                `data: ${JSON.stringify({
+                    type: "question",
+                    question:
+                        result.question,
+
+                    sessionId:
+                        result.sessionId,
+
+                    questionNumber:
+                        result.questionNumber
+                })}\n\n`
+            );
+
+
+            res.write(
+                `data: ${JSON.stringify({
+                    type: "done"
+                })}\n\n`
+            );
+
+
+            res.end();
+
+        } catch (error) {
+
+            console.error(
+                "Start interview error:",
+                error
+            );
+
+
+            res.end();
+        }
+    };
+
+
+    answer = async (req, res) => {
+
+        try {
+
+            const {
+                sessionId,
+                answer
+            } = req.body;
+
+
+            if (!sessionId) {
 
                 return res.status(400).json({
-                    error: "Question is required"
+                    error:
+                        "sessionId is required"
+                });
+            }
+
+
+            if (!answer?.trim()) {
+
+                return res.status(400).json({
+                    error:
+                        "Answer is required"
                 });
             }
 
@@ -37,21 +131,40 @@ class InterviewController {
 
             res.flushHeaders();
 
-            await this.interviewService.processQuestion(
 
-                question,
+            const result =
+                await this.interviewService
+                    .processAnswer(
 
-                async (audio, text) => {
+                        sessionId,
 
-                    res.write(
-                        `data: ${JSON.stringify({
-                            type: "audio",
-                            text: text,
-                            audio:
-                                audio.toString("base64")
-                        })}\n\n`
+                        answer,
+
+                        async (audio, text) => {
+
+                            res.write(
+                                `data: ${JSON.stringify({
+                                    type: "audio",
+                                    text: text,
+                                    audio:
+                                        audio.toString(
+                                            "base64"
+                                        )
+                                })}\n\n`
+                            );
+                        }
                     );
-                },
+
+
+            res.write(
+                `data: ${JSON.stringify({
+                    type: "question",
+                    question:
+                        result.question,
+
+                    questionNumber:
+                        result.questionNumber
+                })}\n\n`
             );
 
 
@@ -66,21 +179,26 @@ class InterviewController {
 
         } catch (error) {
 
-            console.error(error);
+            console.error(
+                "Answer processing error:",
+                error
+            );
+
 
             if (!res.headersSent) {
 
-                res.status(500).json({
-                    error: error.message
+                return res.status(500).json({
+                    error:
+                        error.message
                 });
-
-                return;
             }
+
 
             res.end();
         }
     };
 }
+
 
 module.exports =
     InterviewController;

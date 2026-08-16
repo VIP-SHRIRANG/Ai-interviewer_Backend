@@ -2,18 +2,20 @@ import {
     SpeechRecognitionService
 } from "./speechRecognition.js";
 
+
 import {
     AudioPlayer
 } from "./audioPlayer.js";
+
 
 import {
     InterviewClient
 } from "./interviewClient.js";
 
 
-// ==========================================
-// Initialize services
-// ==========================================
+// ========================================
+// Services
+// ========================================
 
 const speechRecognition =
     new SpeechRecognitionService();
@@ -24,29 +26,30 @@ const audioPlayer =
 
 
 const interviewClient =
-    new InterviewClient(
-        audioPlayer
-    );
+    new InterviewClient();
 
 
-// ==========================================
+// ========================================
 // DOM
-// ==========================================
+// ========================================
 
 const startBtn =
     document.getElementById(
         "start-btn"
     );
 
+
 const stopBtn =
     document.getElementById(
         "stop-btn"
     );
 
+
 const questionOutput =
     document.getElementById(
         "question-output"
     );
+
 
 const answerOutput =
     document.getElementById(
@@ -54,62 +57,136 @@ const answerOutput =
     );
 
 
-// ==========================================
-// Start interview question
-// ==========================================
+// ========================================
+// State
+// ========================================
+
+let sessionId =
+    null;
+
+let interviewActive =
+    false;
+
+let candidateAnswer =
+    "";
+
+
+// ========================================
+// START INTERVIEW
+// ========================================
 
 startBtn.addEventListener(
     "click",
-    () => {
+    async () => {
 
-        questionOutput.innerText =
-            "Listening...";
+        try {
 
-        answerOutput.innerText =
-            "Waiting for answer...";
+            interviewActive =
+                true;
 
-        speechRecognition.start();
+
+            startBtn.disabled =
+                true;
+
+
+            questionOutput.innerText =
+                "Generating question...";
+
+
+            answerOutput.innerText =
+                "Waiting for your answer...";
+
+
+            await interviewClient
+                .startInterview();
+
+
+        } catch (error) {
+
+            console.error(error);
+
+            questionOutput.innerText =
+                error.message;
+
+            startBtn.disabled =
+                false;
+        }
     }
 );
 
 
-// ==========================================
-// Stop speaking
-// ==========================================
+// ========================================
+// SPEECH RECOGNITION
+// ========================================
+
+speechRecognition.onFinalResult =
+    (text) => {
+
+        candidateAnswer =
+            text;
+
+
+        answerOutput.innerText =
+            text;
+    };
+
+
+speechRecognition.onInterimResult =
+    (text) => {
+
+        answerOutput.innerText =
+            candidateAnswer +
+            " " +
+            text;
+    };
+
+
+// ========================================
+// STOP / SUBMIT ANSWER
+// ========================================
 
 stopBtn.addEventListener(
     "click",
     async () => {
 
+        if (!interviewActive) {
+            return;
+        }
+
+
         speechRecognition.stop();
 
 
-        const question =
-            speechRecognition.getTranscript();
+        const answer =
+            speechRecognition
+                .getTranscript();
 
 
-        if (!question) {
+        if (!answer) {
 
-            questionOutput.innerText =
-                "No question detected.";
+            answerOutput.innerText =
+                "No answer detected.";
 
             return;
         }
 
 
-        questionOutput.innerText =
-            question;
+        console.log(
+            "Candidate answer:",
+            answer
+        );
 
 
         answerOutput.innerText =
-            "AI is thinking...";
+            "Processing answer...";
 
 
         try {
 
             await interviewClient
-                .submitQuestion(
-                    question
+                .submitAnswer(
+                    sessionId,
+                    answer
                 );
 
         } catch (error) {
@@ -117,50 +194,81 @@ stopBtn.addEventListener(
             console.error(error);
 
             answerOutput.innerText =
-                `Error: ${error.message}`;
+                error.message;
         }
     }
 );
 
 
-// ==========================================
-// Receive AI sentence
-// ==========================================
+// ========================================
+// RECEIVE AI QUESTION
+// ========================================
 
-interviewClient.onText =
-    (text) => {
+interviewClient.onQuestion =
+    (data) => {
 
-        if (
-            answerOutput.innerText ===
-            "AI is thinking..."
-        ) {
-
-            answerOutput.innerText = "";
-        }
+        sessionId =
+            data.sessionId ||
+            sessionId;
 
 
-        answerOutput.innerText +=
-            text + " ";
+        questionOutput.innerText =
+            `Question ${data.questionNumber}:\n\n` +
+            data.question;
+
+
+        answerOutput.innerText =
+            "Listening will begin after the question.";
     };
 
 
-// ==========================================
-// AI completed
-// ==========================================
+// ========================================
+// RECEIVE AUDIO
+// ========================================
 
-interviewClient.onComplete =
-    (answer) => {
+interviewClient.onAudio =
+    (audio) => {
 
-        console.log(
-            "Complete AI answer:",
-            answer
+        audioPlayer.addAudio(
+            audio
         );
     };
 
 
-// ==========================================
-// Error
-// ==========================================
+// ========================================
+// AI FINISHED SPEAKING
+// ========================================
+
+interviewClient.onComplete =
+    () => {
+
+        if (!interviewActive) {
+            return;
+        }
+
+
+        console.log(
+            "AI finished speaking."
+        );
+
+
+        // Automatically start listening
+
+        candidateAnswer =
+            "";
+
+
+        answerOutput.innerText =
+            "🎤 Your turn. Speak now.";
+
+
+        speechRecognition.start();
+    };
+
+
+// ========================================
+// ERROR
+// ========================================
 
 interviewClient.onError =
     (error) => {

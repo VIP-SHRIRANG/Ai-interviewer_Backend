@@ -1,41 +1,95 @@
-const express = require("express");
-const path = require("path");
+const express =
+    require("express");
+
+const path =
+    require("path");
+
+
+// Providers
 
 const OllamaProvider =
-    require("./src/providers/ollamaProvider");
+    require(
+        "./src/providers/ollamaProvider"
+    );
 
 const EdgeTtsProvider =
-    require("./src/providers/edgeTtsProvider");
+    require(
+        "./src/providers/edgeTtsProvider"
+    );
+
+
+// Services
 
 const LLMService =
-    require("./src/services/llmService");
+    require(
+        "./src/services/llmService"
+    );
 
 const TTSService =
-    require("./src/services/ttsService");
+    require(
+        "./src/services/ttsService"
+    );
+
+const QuestionService =
+    require(
+        "./src/services/questionService"
+    );
 
 const InterviewService =
-    require("./src/services/interviewService");
+    require(
+        "./src/services/interviewService"
+    );
+
+const InterviewSession =
+    require(
+        "./src/services/interviewSession"
+    );
+
+
+// Controller
 
 const InterviewController =
-    require("./src/controllers/interviewController");
+    require(
+        "./src/controllers/interviewController"
+    );
 
-const app = express();
+
+// Routes
+
+const createInterviewRoutes =
+    require(
+        "./src/routes/interviewRoutes"
+    );
 
 
-// Middleware
+const app =
+    express();
 
-app.use(express.json());
+
+app.use(
+    express.json()
+);
+
+app.use(
+    express.urlencoded({
+        extended: true
+    })
+);
+
 
 app.use(
     express.static(
-        path.join(__dirname, "public")
+        path.join(
+            __dirname,
+            "public"
+        )
     )
 );
 
 
-// ===============================
+// ==========================================
 // Dependency Injection
-// ===============================
+// ==========================================
 
 const ollamaProvider =
     new OllamaProvider(
@@ -62,10 +116,21 @@ const ttsService =
     );
 
 
-const interviewService =
-    new InterviewService(
+const questionService =
+    new QuestionService(
         llmService,
         ttsService
+    );
+
+
+const interviewSession =
+    new InterviewSession();
+
+
+const interviewService =
+    new InterviewService(
+        questionService,
+        interviewSession
     );
 
 
@@ -75,29 +140,29 @@ const interviewController =
     );
 
 
-// ===============================
+// ==========================================
 // Routes
-// ===============================
+// ==========================================
 
-app.get("/", (req, res) => {
-    reees.sendFile(
-        path.join(
-            __dirname,
-            "public",
-            "index.html"
-        )
-    );
-});
-
-app.post(
-    "/submit",
-    interviewController.submit
+app.use(
+    "/interview",
+    createInterviewRoutes(
+        interviewController
+    )
 );
 
 
-app.listen(3000, () => {
+// ==========================================
+// Start server
+// ==========================================
 
-    console.log(
-        "Server running at http://localhost:3000"
-    );
-});
+app.listen(
+    3000,
+    () => {
+
+        console.log(
+            "Server running at http://localhost:3000"
+        );
+
+    }
+);

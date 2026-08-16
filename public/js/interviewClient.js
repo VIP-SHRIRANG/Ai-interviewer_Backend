@@ -1,11 +1,10 @@
 export class InterviewClient {
 
-    constructor(audioPlayer) {
+    constructor() {
 
-        this.audioPlayer =
-            audioPlayer;
+        this.onAudio = null;
 
-        this.onText = null;
+        this.onQuestion = null;
 
         this.onComplete = null;
 
@@ -13,23 +12,56 @@ export class InterviewClient {
     }
 
 
-    async submitQuestion(question) {
+    async startInterview() {
+
+        await this.streamRequest(
+            "/interview/start"
+        );
+    }
+
+
+    async submitAnswer(
+        sessionId,
+        answer
+    ) {
+
+        await this.streamRequest(
+            "/interview/answer",
+            {
+                sessionId,
+                answer
+            }
+        );
+    }
+
+
+    async streamRequest(
+        url,
+        body = null
+    ) {
+
+        const options = {
+
+            method: "POST",
+
+            headers: {
+                "Content-Type":
+                    "application/json"
+            }
+        };
+
+
+        if (body) {
+
+            options.body =
+                JSON.stringify(body);
+        }
+
 
         const response =
             await fetch(
-                "/submit",
-                {
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body: JSON.stringify({
-                        question
-                    })
-                }
+                url,
+                options
             );
 
 
@@ -65,9 +97,12 @@ export class InterviewClient {
 
 
             buffer +=
-                decoder.decode(value, {
-                    stream: true
-                });
+                decoder.decode(
+                    value,
+                    {
+                        stream: true
+                    }
+                );
 
 
             const events =
@@ -78,16 +113,25 @@ export class InterviewClient {
                 events.pop();
 
 
-            for (const event of events) {
+            for (
+                const event of events
+            ) {
 
-                if (!event.startsWith("data:")) {
+                if (
+                    !event.startsWith(
+                        "data:"
+                    )
+                ) {
                     continue;
                 }
 
 
                 const json =
                     event
-                        .replace("data:", "")
+                        .replace(
+                            /^data:\s*/,
+                            ""
+                        )
                         .trim();
 
 
@@ -100,40 +144,50 @@ export class InterviewClient {
                     JSON.parse(json);
 
 
-                // Audio sentence
+                if (
+                    data.type ===
+                    "audio"
+                ) {
 
-                if (data.type === "audio") {
+                    if (this.onAudio) {
 
-                    if (this.onText) {
-
-                        this.onText(
-                            data.text
+                        this.onAudio(
+                            data.audio
                         );
                     }
-
-
-                    this.audioPlayer.addAudio(
-                        data.audio
-                    );
                 }
 
 
-                // Complete
+                if (
+                    data.type ===
+                    "question"
+                ) {
 
-                if (data.type === "done") {
+                    if (this.onQuestion) {
+
+                        this.onQuestion(
+                            data
+                        );
+                    }
+                }
+
+
+                if (
+                    data.type ===
+                    "done"
+                ) {
 
                     if (this.onComplete) {
 
-                        this.onComplete(
-                            data.answer
-                        );
+                        this.onComplete();
                     }
                 }
 
 
-                // Error
-
-                if (data.type === "error") {
+                if (
+                    data.type ===
+                    "error"
+                ) {
 
                     if (this.onError) {
 
