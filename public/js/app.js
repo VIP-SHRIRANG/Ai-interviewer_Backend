@@ -51,6 +51,12 @@ const questionOutput =
     );
 
 
+const feedbackOutput =
+    document.getElementById(
+        "feedback-output"
+    );
+
+
 const answerOutput =
     document.getElementById(
         "answer-output"
@@ -233,7 +239,16 @@ interviewClient.onAudio =
             audio
         );
     };
+// ========================================
+// AI GIVING INTERVIEW FEEDBACK
+// ========================================
 
+interviewClient.onFeedback =
+    (feedback) => {
+
+        feedbackOutput.innerText =
+            feedback;
+    };
 
 // ========================================
 // AI FINISHED SPEAKING

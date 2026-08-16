@@ -2,7 +2,8 @@ class InterviewService {
 
     constructor(
         questionService,
-        interviewSession
+        interviewSession,
+        evaluationService
     ) {
 
         this.questionService =
@@ -10,6 +11,9 @@ class InterviewService {
 
         this.interviewSession =
             interviewSession;
+
+        this.evaluationService =
+            evaluationService;
     }
 
 
@@ -54,7 +58,8 @@ class InterviewService {
     async processAnswer(
         sessionId,
         answer,
-        onAudio
+        onAudio,
+        onFeedback
     ) {
 
         const session =
@@ -76,7 +81,9 @@ class InterviewService {
             session.currentQuestion;
 
 
-        // Store answer
+    // =================================
+    // 1. Store answer
+    // =================================
 
         this.interviewSession
             .addAnswer(
@@ -88,8 +95,38 @@ class InterviewService {
         const nextQuestionNumber =
             session.questionNumber + 1;
 
+    // =================================
+    // 2. Generate feedback
+    // =================================
 
-        // Generate next question
+    const feedback =
+        this.evaluationService
+            .evaluateAnswer(
+                previousQuestion,
+                answer
+            );
+
+
+    console.log(
+        "Feedback:",
+        feedback
+    );
+
+
+    // =================================
+    // 3. Send feedback to controller
+    // =================================
+
+    if (onFeedback) {
+
+        onFeedback(
+            feedback
+        );
+    }
+
+    // =================================
+    // 4. Generate next question
+    // =================================
 
         const nextQuestion =
             await this.questionService
@@ -122,7 +159,10 @@ class InterviewService {
                 nextQuestion,
 
             questionNumber:
-                session.questionNumber
+                session.questionNumber,
+
+            feedback:
+                feedback
         };
     }
 }

@@ -6,6 +6,8 @@ export class InterviewClient {
 
         this.onQuestion = null;
 
+        this.onFeedback = null;
+
         this.onComplete = null;
 
         this.onError = null;
@@ -170,7 +172,14 @@ export class InterviewClient {
                         );
                     }
                 }
+                
+                if (data.type === "feedback") {
 
+                    if (this.onFeedback) {
+
+                        this.onFeedback(data.feedback);
+                    }
+                }
 
                 if (
                     data.type ===

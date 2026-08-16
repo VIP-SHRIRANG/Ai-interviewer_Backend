@@ -152,6 +152,14 @@ class InterviewController {
                                         )
                                 })}\n\n`
                             );
+                        },
+                        (feedback)=>{
+                            res.write(
+                                `data: ${JSON.stringify({
+                                    type: "feedback",
+                                    feedback: feedback
+                                })}\n\n`
+                            );
                         }
                     );
 
