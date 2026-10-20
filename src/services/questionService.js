@@ -17,9 +17,72 @@ class QuestionService {
     }
 
 
+    async speakText(
+        text,
+        onAudio
+    ) {
+
+        if (!text || !onAudio) {
+            return;
+        }
+
+        const sentenceBuffer =
+            new SentenceBuffer();
+
+        const sentence =
+            sentenceBuffer.add(text + " ");
+
+        if (sentence) {
+            try {
+                const audio =
+                    await this.ttsService.speak(
+                        sentence
+                    );
+
+                if (audio) {
+                    await onAudio(
+                        audio,
+                        sentence
+                    );
+                }
+            } catch (error) {
+                console.error(
+                    "TTS speakText error:",
+                    error.message
+                );
+            }
+        }
+
+        const remaining =
+            sentenceBuffer.flush();
+
+        if (remaining) {
+            try {
+                const audio =
+                    await this.ttsService.speak(
+                        remaining
+                    );
+
+                if (audio) {
+                    await onAudio(
+                        audio,
+                        remaining
+                    );
+                }
+            } catch (error) {
+                console.error(
+                    "TTS speakText flush error:",
+                    error.message
+                );
+            }
+        }
+    }
+
+
     async generateQuestion(
         questionNumber,
-        onAudio
+        onAudio,
+        context = {}
     ) {
 
         const sentenceBuffer =
@@ -48,17 +111,27 @@ class QuestionService {
                 }
 
 
-                const audio =
-                    await this.ttsService.speak(
-                        sentence
+                try {
+                    const audio =
+                        await this.ttsService.speak(
+                            sentence
+                        );
+
+                    if (audio && onAudio) {
+                        await onAudio(
+                            audio,
+                            sentence
+                        );
+                    }
+                } catch (error) {
+                    console.error(
+                        "TTS synthesis warning:",
+                        error.message
                     );
+                }
+            },
 
-
-                await onAudio(
-                    audio,
-                    sentence
-                );
-            }
+            context
         );
 
 
@@ -68,20 +141,28 @@ class QuestionService {
 
         if (remaining) {
 
-            const audio =
-                await this.ttsService.speak(
-                    remaining
+            try {
+                const audio =
+                    await this.ttsService.speak(
+                        remaining
+                    );
+
+                if (audio && onAudio) {
+                    await onAudio(
+                        audio,
+                        remaining
+                    );
+                }
+            } catch (error) {
+                console.error(
+                    "TTS flush warning:",
+                    error.message
                 );
-
-
-            await onAudio(
-                audio,
-                remaining
-            );
+            }
         }
 
 
-        return completeQuestion;
+        return completeQuestion.trim();
     }
 
 
@@ -89,7 +170,8 @@ class QuestionService {
         question,
         answer,
         questionNumber,
-        onAudio
+        onAudio,
+        context = {}
     ) {
 
         const sentenceBuffer =
@@ -120,17 +202,27 @@ class QuestionService {
                 }
 
 
-                const audio =
-                    await this.ttsService.speak(
-                        sentence
+                try {
+                    const audio =
+                        await this.ttsService.speak(
+                            sentence
+                        );
+
+                    if (audio && onAudio) {
+                        await onAudio(
+                            audio,
+                            sentence
+                        );
+                    }
+                } catch (error) {
+                    console.error(
+                        "TTS synthesis warning:",
+                        error.message
                     );
+                }
+            },
 
-
-                await onAudio(
-                    audio,
-                    sentence
-                );
-            }
+            context
         );
 
 
@@ -140,20 +232,28 @@ class QuestionService {
 
         if (remaining) {
 
-            const audio =
-                await this.ttsService.speak(
-                    remaining
+            try {
+                const audio =
+                    await this.ttsService.speak(
+                        remaining
+                    );
+
+                if (audio && onAudio) {
+                    await onAudio(
+                        audio,
+                        remaining
+                    );
+                }
+            } catch (error) {
+                console.error(
+                    "TTS flush warning:",
+                    error.message
                 );
-
-
-            await onAudio(
-                audio,
-                remaining
-            );
+            }
         }
 
 
-        return completeQuestion;
+        return completeQuestion.trim();
     }
 }
 

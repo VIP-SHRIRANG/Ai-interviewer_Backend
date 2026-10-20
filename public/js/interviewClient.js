@@ -8,16 +8,35 @@ export class InterviewClient {
 
         this.onFeedback = null;
 
+        this.onSessionCompleted = null;
+
         this.onComplete = null;
 
         this.onError = null;
     }
 
 
-    async startInterview() {
+    async fetchTopics() {
+
+        const response =
+            await fetch("/interview/topics");
+
+        if (!response.ok) {
+
+            throw new Error(
+                `Failed to load L1 topics: ${response.status}`
+            );
+        }
+
+        return await response.json();
+    }
+
+
+    async startInterview(options = {}) {
 
         await this.streamRequest(
-            "/interview/start"
+            "/interview/start",
+            options
         );
     }
 
@@ -34,6 +53,76 @@ export class InterviewClient {
                 answer
             }
         );
+    }
+
+
+    async finishInterview(
+        sessionId
+    ) {
+
+        const response =
+            await fetch(
+                `/interview/${encodeURIComponent(sessionId)}/finish`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ sessionId })
+                }
+            );
+
+        if (!response.ok) {
+
+            throw new Error(
+                `Failed to finish interview: ${response.status}`
+            );
+        }
+
+        return await response.json();
+    }
+
+
+    async downloadReport(
+        sessionId
+    ) {
+
+        const response =
+            await fetch(
+                `/interview/report/${encodeURIComponent(sessionId)}`,
+                {
+                    method: "GET"
+                }
+            );
+
+        if (!response.ok) {
+
+            throw new Error(
+                "Unable to download interview report"
+            );
+        }
+
+        const blob =
+            await response.blob();
+
+        const url =
+            window.URL.createObjectURL(blob);
+
+        const link =
+            document.createElement("a");
+
+        link.href = url;
+
+        link.download =
+            `interview-report-${sessionId}.pdf`;
+
+        document.body.appendChild(link);
+
+        link.click();
+
+        link.remove();
+
+        window.URL.revokeObjectURL(url);
     }
 
 
@@ -69,9 +158,18 @@ export class InterviewClient {
 
         if (!response.ok) {
 
-            throw new Error(
-                `Server error: ${response.status}`
-            );
+            let errMsg = `Server error: ${response.status}`;
+
+            try {
+                const errJson = await response.json();
+                if (errJson.error) {
+                    errMsg = errJson.error;
+                }
+            } catch (_) {
+                // ignore JSON parse error
+            }
+
+            throw new Error(errMsg);
         }
 
 
@@ -172,14 +270,35 @@ export class InterviewClient {
                         );
                     }
                 }
-                
-                if (data.type === "feedback") {
+
+
+                if (
+                    data.type ===
+                    "feedback"
+                ) {
 
                     if (this.onFeedback) {
 
-                        this.onFeedback(data.feedback);
+                        this.onFeedback(
+                            data
+                        );
                     }
                 }
+
+
+                if (
+                    data.type ===
+                    "completed"
+                ) {
+
+                    if (this.onSessionCompleted) {
+
+                        this.onSessionCompleted(
+                            data
+                        );
+                    }
+                }
+
 
                 if (
                     data.type ===

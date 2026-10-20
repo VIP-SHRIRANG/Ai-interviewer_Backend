@@ -4,6 +4,9 @@ const express =
 const path =
     require("path");
 
+const config =
+    require("./src/config/config");
+
 
 // Providers
 
@@ -35,6 +38,11 @@ const QuestionService =
         "./src/services/questionService"
     );
 
+const EvaluationService =
+    require(
+        "./src/services/evaluationService"
+    );
+
 const InterviewService =
     require(
         "./src/services/interviewService"
@@ -43,6 +51,11 @@ const InterviewService =
 const InterviewSession =
     require(
         "./src/services/interviewSession"
+    );
+
+const ReportService =
+    require(
+        "./src/services/reportService"
     );
 
 
@@ -93,14 +106,14 @@ app.use(
 
 const ollamaProvider =
     new OllamaProvider(
-        "http://localhost:11434",
-        "llama3.2"
+        config.OLLAMA.BASE_URL,
+        config.OLLAMA.MODEL
     );
 
 
 const edgeTtsProvider =
     new EdgeTtsProvider(
-        "en-US-AriaNeural"
+        config.TTS.VOICE
     );
 
 
@@ -123,20 +136,32 @@ const questionService =
     );
 
 
+const evaluationService =
+    new EvaluationService(
+        llmService
+    );
+
+
 const interviewSession =
     new InterviewSession();
+
+
+const reportService =
+    new ReportService();
 
 
 const interviewService =
     new InterviewService(
         questionService,
-        interviewSession
+        interviewSession,
+        evaluationService
     );
 
 
 const interviewController =
     new InterviewController(
-        interviewService
+        interviewService,
+        reportService
     );
 
 
@@ -144,11 +169,19 @@ const interviewController =
 // Routes
 // ==========================================
 
-app.use(
-    "/interview",
+const interviewRouter =
     createInterviewRoutes(
         interviewController
-    )
+    );
+
+app.use(
+    "/interview",
+    interviewRouter
+);
+
+app.use(
+    "/api/interview",
+    interviewRouter
 );
 
 
@@ -156,13 +189,25 @@ app.use(
 // Start server
 // ==========================================
 
-app.listen(
-    3000,
-    () => {
+if (require.main === module) {
 
-        console.log(
-            "Server running at http://localhost:3000"
-        );
+    app.listen(
+        config.PORT,
+        () => {
 
-    }
-);
+            console.log(
+                `Server running at http://localhost:${config.PORT}`
+            );
+
+        }
+    );
+}
+
+
+module.exports = {
+    app,
+    interviewService,
+    interviewSession,
+    evaluationService,
+    reportService
+};

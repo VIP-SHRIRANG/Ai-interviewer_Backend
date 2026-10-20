@@ -7,14 +7,26 @@ export class AudioPlayer {
         this.isPlaying = false;
 
         this.currentAudio = null;
+
+        this.onQueueEmpty = null;
     }
 
 
     addAudio(base64Audio) {
 
+        if (!base64Audio) {
+            return;
+        }
+
         this.queue.push(base64Audio);
 
         this.playNext();
+    }
+
+
+    hasPendingAudio() {
+
+        return this.isPlaying || this.queue.length > 0;
     }
 
 
@@ -25,6 +37,9 @@ export class AudioPlayer {
         }
 
         if (this.queue.length === 0) {
+            if (this.onQueueEmpty) {
+                this.onQueueEmpty();
+            }
             return;
         }
 
