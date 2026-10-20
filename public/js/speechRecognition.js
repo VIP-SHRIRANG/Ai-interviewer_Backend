@@ -24,6 +24,8 @@ export class SpeechRecognitionService {
 
         this.finalTranscript = "";
 
+        this.interimTranscript = "";
+
         this.onFinalResult = null;
 
         this.onInterimResult = null;
@@ -60,7 +62,7 @@ export class SpeechRecognitionService {
 
     handleResult(event) {
 
-        let interimTranscript = "";
+        let currentInterim = "";
 
 
         for (
@@ -76,14 +78,18 @@ export class SpeechRecognitionService {
             if (event.results[i].isFinal) {
 
                 this.finalTranscript +=
-                    transcript;
+                    (this.finalTranscript ? " " : "") +
+                    transcript.trim();
 
             } else {
 
-                interimTranscript +=
+                currentInterim +=
                     transcript;
             }
         }
+
+        this.interimTranscript =
+            currentInterim.trim();
 
 
         if (this.onFinalResult) {
@@ -97,7 +103,7 @@ export class SpeechRecognitionService {
         if (this.onInterimResult) {
 
             this.onInterimResult(
-                interimTranscript
+                this.interimTranscript
             );
         }
     }
@@ -106,6 +112,8 @@ export class SpeechRecognitionService {
     start() {
 
         this.finalTranscript = "";
+
+        this.interimTranscript = "";
 
         this.recognition.start();
     }
@@ -119,6 +127,9 @@ export class SpeechRecognitionService {
 
     getTranscript() {
 
-        return this.finalTranscript.trim();
+        return (
+            this.finalTranscript +
+            (this.interimTranscript ? " " + this.interimTranscript : "")
+        ).trim();
     }
 }
