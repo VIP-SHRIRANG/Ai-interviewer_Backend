@@ -4,6 +4,9 @@ const express =
 const path =
     require("path");
 
+const cors =
+    require("cors");
+
 const config =
     require("./src/config/config");
 
@@ -89,6 +92,11 @@ app.use(
     })
 );
 
+//Added CORS middleware to allow requests from frontend
+app.use(cors({
+  origin: "http://localhost:5173",       // your Vite URL
+  exposedHeaders: ["x-session-id"],
+}));
 
 app.use(
     express.static(

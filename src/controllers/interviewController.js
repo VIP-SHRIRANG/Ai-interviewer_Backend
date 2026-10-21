@@ -41,7 +41,6 @@ class InterviewController {
                 candidateName
             } = req.body || {};
 
-
             res.setHeader(
                 "Content-Type",
                 "text/event-stream"
