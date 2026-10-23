@@ -40,7 +40,10 @@ class InterviewService {
                     onAudio,
                     {
                         topic: session.topic,
-                        difficulty: session.difficulty
+                        difficulty: session.difficulty,
+                        company: session.company,
+                        role: session.role,
+                        round: session.round
                     }
                 );
 
@@ -62,7 +65,16 @@ class InterviewService {
 
             candidateName:
                 session.candidateName,
+            
+            company:
+                session.company,
 
+            role:
+                session.role,
+
+            round:
+                session.round,
+            
             topic:
                 session.topic,
 
@@ -227,6 +239,9 @@ class InterviewService {
                     {
                         topic: session.topic,
                         difficulty: nextDifficulty,
+                        company: session.company,
+                        role: session.role,
+                        round: session.round,
                         previousQuestions,
                         missingConcepts: evaluation.missingConcepts
                     }

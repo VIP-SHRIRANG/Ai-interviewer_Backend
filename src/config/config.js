@@ -10,6 +10,22 @@ module.exports = {
         VOICE: process.env.TTS_VOICE || "en-US-AriaNeural"
     },
 
+    //Added roles
+    ROLES: [
+        "Backend Developer", "Frontend Developer", "Full Stack Developer",
+        "Software Engineer", "Android Developer", "Data Analyst",
+        "Data Scientist", "DevOps Engineer", "QA Engineer"
+    ],
+
+    RECOMMENDER: {
+        ENABLED: process.env.USE_RECOMMENDER !== "false",
+        ARTIFACTS_DIR: process.env.RECOMMENDER_DIR || "artifacts",
+        POOLING: process.env.RECOMMENDER_POOLING || "mean",
+        COMPANY: process.env.RECOMMENDER_COMPANY || "nCircle",
+        ROLE: process.env.RECOMMENDER_ROLE || "Backend Developer",
+        ROUND: process.env.RECOMMENDER_ROUND || "L1 Technical Interview"
+    },
+
     L1: {
         DEFAULT_TOPIC: "JavaScript",
         DEFAULT_DIFFICULTY: "easy",

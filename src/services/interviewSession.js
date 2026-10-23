@@ -38,6 +38,21 @@ class InterviewSession {
             (options.candidateName && String(options.candidateName).trim()) ||
             "Candidate";
 
+        const company =
+            (options.company && String(options.company).trim()) ||
+            config.RECOMMENDER?.COMPANY ||
+            "";
+
+        const role =
+            (options.role && String(options.role).trim()) ||
+            config.RECOMMENDER?.ROLE ||
+            "";
+
+        const round =
+            (options.round && String(options.round).trim()) ||
+            config.RECOMMENDER?.ROUND ||
+            "";
+
         const session = {
 
             sessionId,
@@ -45,6 +60,12 @@ class InterviewSession {
             interviewMode: "L1",
 
             candidateName,
+
+            company,
+
+            role,
+
+            round,
 
             topic,
 

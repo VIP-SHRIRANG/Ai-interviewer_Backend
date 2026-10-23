@@ -1,9 +1,42 @@
 class LLMService {
 
-    constructor(llmProvider) {
+    constructor(llmProvider, questionRecommender = null) {
 
         this.llmProvider =
             llmProvider;
+
+        this.questionRecommender =
+            questionRecommender;
+    }
+
+
+    async _recommendQuestion(
+        context,
+        previousQuestions
+    ) { 
+        //Log for checking if everything is working.
+        console.log("Recommender:", context.company, "|", context.role, "|", context.round, "| asked so far:", previousQuestions.length);
+
+        if (!this.questionRecommender) {
+            return null;
+        }
+
+        try {
+
+            return await this.questionRecommender.recommend({
+                ...context,
+                previousQuestions
+            });
+
+        } catch (err) {
+
+            console.error(
+                "Recommender failed, falling back to LLM question:",
+                err.message
+            );
+
+            return null;
+        }
     }
 
 
@@ -13,6 +46,23 @@ class LLMService {
         context = {}
     ) {
 
+        // Try the recommender first (no questions asked yet)
+        const recommended =
+            await this._recommendQuestion(
+                context,
+                []
+            );
+
+        if (recommended?.question) {
+
+            await onToken(
+                recommended.question
+            );
+
+            return;
+        }
+
+        // Fallback: generate with the LLM
         const topic =
             context.topic || "JavaScript";
 
@@ -49,6 +99,33 @@ Rules:
         context = {}
     ) {
 
+        // Questions asked so far (including the most recent one)
+        const askedQuestions = [
+            ...(
+                Array.isArray(context.previousQuestions)
+                    ? context.previousQuestions
+                    : []
+            ),
+            question
+        ].filter(Boolean);
+
+        // Try the recommender first
+        const recommended =
+            await this._recommendQuestion(
+                context,
+                askedQuestions
+            );
+
+        if (recommended?.question) {
+
+            await onToken(
+                recommended.question
+            );
+
+            return;
+        }
+
+        // Fallback: generate with the LLM
         const topic =
             context.topic || "JavaScript";
 
