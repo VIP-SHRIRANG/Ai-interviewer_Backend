@@ -15,6 +15,10 @@ function createInterviewRoutes(
         controller.getTopics
     );
 
+    router.get(
+        "/options", 
+        controller.getOptions
+    );
 
     router.post(
         "/start",

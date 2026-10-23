@@ -18,6 +18,11 @@ const OllamaProvider =
         "./src/providers/ollamaProvider"
     );
 
+const QuestionRecommenderService =
+    require(
+        "./src/services/questionRecommenderService"
+    );
+
 const EdgeTtsProvider =
     require(
         "./src/providers/edgeTtsProvider"
@@ -124,12 +129,24 @@ const edgeTtsProvider =
         config.TTS.VOICE
     );
 
+const questionRecommender = config.RECOMMENDER.ENABLED
+    ? new QuestionRecommenderService({
+        artifactsDir: config.RECOMMENDER.ARTIFACTS_DIR,
+        pooling: config.RECOMMENDER.POOLING,
+        defaults: {
+            company: config.RECOMMENDER.COMPANY,
+            role: config.RECOMMENDER.ROLE,
+            round: config.RECOMMENDER.ROUND
+        }
+    })
+    : null;
 
-const llmService =
-    new LLMService(
-        ollamaProvider
-    );
+    questionRecommender?.init()
+    .then(() => console.log("Question recommender ready"))
+    .catch((e) => console.error("Recommender failed to load, using LLM questions:", e.message));
 
+const llmService = 
+    new LLMService(ollamaProvider, questionRecommender);
 
 const ttsService =
     new TTSService(
@@ -169,7 +186,8 @@ const interviewService =
 const interviewController =
     new InterviewController(
         interviewService,
-        reportService
+        reportService,
+        questionRecommender
     );
 
 

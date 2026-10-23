@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+artifacts/
+artifacts_raw/
 
 # Environment variables
 .env

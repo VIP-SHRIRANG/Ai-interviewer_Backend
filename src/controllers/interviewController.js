@@ -6,7 +6,8 @@ class InterviewController {
 
     constructor(
         interviewService,
-        reportService = null
+        reportService = null,
+        questionRecommender = null
     ) {
 
         this.interviewService =
@@ -14,8 +15,27 @@ class InterviewController {
 
         this.reportService =
             reportService;
+
+        this.questionRecommender =
+            questionRecommender;
     }
 
+    //Adding getOptions handler
+    getOptions = async (req, res) => {
+        try {
+            const opts = this.questionRecommender
+                ? await this.questionRecommender.options()
+                : {};
+
+            return res.status(200).json({
+                companies: opts.companies || [],
+                roles: config.RECOMMENDER.ROLES,
+                rounds: opts.rounds || []
+            });
+        } catch (error) {
+            return res.status(500).json({ error: error.message });
+        }
+    };
 
     getTopics = (req, res) => {
 
@@ -35,8 +55,9 @@ class InterviewController {
         try {
 
             const {
-                topic,
-                difficulty,
+                company,
+                role,
+                round,
                 maxQuestions,
                 candidateName
             } = req.body || {};
@@ -63,10 +84,12 @@ class InterviewController {
                 await this.interviewService
                     .startInterview(
                         {
-                            topic,
-                            difficulty,
+                            topic:role,
+                            company,
+                            role,
+                            round,
                             maxQuestions,
-                            candidateName
+                            candidateName   
                         },
                         async (audio, text) => {
 
