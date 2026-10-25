@@ -236,6 +236,12 @@ class InterviewController {
                                     evaluation: evaluationPayload
                                 })}\n\n`
                             );
+                        },
+                        //Added new function to notify the client that the answer is being finalized
+                        () => {
+                            res.write(
+                                `data: ${JSON.stringify({ type: "finalizing" })}\n\n`
+                            );
                         }
                     );
 
@@ -265,7 +271,9 @@ class InterviewController {
                         difficulty:
                             result.difficulty,
                         averageScore:
-                            result.averageScore
+                            result.averageScore,
+                        pendingEvaluations:
+                            result.pendingEvaluations
                     })}\n\n`
                 );
             }
@@ -372,6 +380,27 @@ class InterviewController {
         }
     };
 
+    //Handler to get status
+    getStatus = (req, res) => {
+
+        try {
+
+            const status =
+                this.interviewService
+                    .getStatus(
+                        req.params.sessionId,
+                        req.query.since
+                    );
+
+            return res.status(200).json(status);
+
+        } catch (error) {
+
+            return res.status(404).json({
+                error: error.message
+            });
+        }
+    };
 
     downloadReport = async (req, res) => {
 
