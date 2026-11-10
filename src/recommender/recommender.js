@@ -154,24 +154,67 @@ class Recommender {
 }
 
 
-/** One interview session. Never returns the same question (or a near-duplicate) twice. */
+/**
+ * Remembers which questions (concepts) were recently shown to ANY candidate,
+ * so that the next candidate is steered towards ones nobody has seen lately.
+ * The memory fades over time (half-life), so old exposure stops mattering.
+ * In-memory only: it resets when the server restarts.
+ */
+class ExposureTracker {
+
+    constructor({ halfLifeMs = 6 * 60 * 60 * 1000 } = {}) {
+        this.halfLifeMs = halfLifeMs;
+        this.map = new Map();   // cluster -> { value, at }
+    }
+
+    get(cluster) {
+        const entry = this.map.get(cluster);
+        if (!entry) return 0;
+        return entry.value * Math.pow(0.5, (Date.now() - entry.at) / this.halfLifeMs);
+    }
+
+    record(cluster) {
+        this.map.set(cluster, { value: this.get(cluster) + 1, at: Date.now() });
+    }
+}
+
+
+/**
+ * One interview session.
+ *
+ * Old behaviour: take the 3 best matches and pick almost always the best one,
+ * so everyone with the same company/role got the same questions.
+ *
+ * New behaviour:
+ *  1. take the best phrasing of each unasked concept (cluster) and keep the top `pool`
+ *  2. score each as a z-score inside that pool (relevance stays the main signal)
+ *  3. subtract a penalty for topics this session already used, and for concepts
+ *     that other candidates were recently shown (shared ExposureTracker)
+ *  4. pick randomly with a softmax over those scores
+ * A bigger `pool` / `temperature` = more variety, a smaller one = more relevance.
+ */
 class Session {
 
     constructor(rec, base, {
-        topicPenalty = 0.05,
-        topK = 3,
-        temperature = 0.05,
+        topicPenalty = 0.8,
+        pool = 80,
+        temperature = 1.0,
+        exposure = null,
+        exposurePenalty = 1.5,
         seed = null
     } = {}) {
         this.rec = rec;
         this.base = base;
         this.topicPenalty = topicPenalty;
-        this.topK = topK;
+        this.pool = pool;
         this.temperature = temperature;
+        this.exposure = exposure;
+        this.exposurePenalty = exposurePenalty;
         this.rng = seed === null || seed === undefined ? Math.random : mulberry32(seed);
         this.asked = new Set();
         this.topicCounts = new Float64Array(rec.nTopics);
         this.history = [];
+        this._order = null;
     }
 
     // The Python constructor encoded the query synchronously; in Node it is async.
@@ -206,45 +249,67 @@ class Session {
 
     next() {
         const r = this.rec;
-        const scores = new Float64Array(r.size);
-        const best = [];   // top-k indices, highest score first
 
-        for (let i = 0; i < r.size; i++) {
-            if (this.asked.has(r.cluster[i])) {
-                scores[i] = -Infinity;
-                continue;
-            }
-
-            const s = this.base[i] - this.topicPenalty * this.topicCounts[r.topicId[i]];
-            scores[i] = s;
-
-            if (best.length < this.topK || s > scores[best[best.length - 1]]) {
-                let pos = best.length;
-                while (pos > 0 && scores[best[pos - 1]] < s) pos--;
-                best.splice(pos, 0, i);
-                if (best.length > this.topK) best.pop();
-            }
+        // Rows sorted by relevance (best first); computed once per session
+        if (!this._order) {
+            this._order = Array.from({ length: r.size }, (_, i) => i)
+                .sort((a, b) => this.base[b] - this.base[a]);
         }
 
-        if (best.length === 0) return null;   // question bank exhausted
+        // 1) best phrasing of each concept that has not been asked yet
+        const candidates = [];
+        const seen = new Set();
 
-        let chosen = best[0];
+        for (const i of this._order) {
+            const c = r.cluster[i];
+            if (this.asked.has(c) || seen.has(c)) continue;
 
-        if (best.length > 1 && this.temperature > 0) {
-            const max = scores[best[0]];
-            const weights = best.map((idx) => Math.exp((scores[idx] - max) / this.temperature));
-            const total = weights.reduce((a, b) => a + b, 0);
+            seen.add(c);
+            candidates.push(i);
 
-            let u = this.rng() * total;
-            chosen = best[best.length - 1];
-            for (let j = 0; j < best.length; j++) {
-                u -= weights[j];
-                if (u <= 0) { chosen = best[j]; break; }
-            }
+            if (candidates.length >= this.pool) break;
         }
+
+        if (candidates.length === 0) return null;   // question bank exhausted
+
+        // 2) relevance as a z-score inside the pool
+        let mean = 0;
+        for (const i of candidates) mean += this.base[i];
+        mean /= candidates.length;
+
+        let variance = 0;
+        for (const i of candidates) variance += (this.base[i] - mean) ** 2;
+        const std = Math.sqrt(variance / candidates.length) || 1;
+
+        // 3) penalties: topics already used here, concepts recently shown to others
+        const adjusted = candidates.map((i) => {
+            let z = (this.base[i] - mean) / std;
+            z -= this.topicPenalty * this.topicCounts[r.topicId[i]];
+
+            if (this.exposure) {
+                z -= this.exposurePenalty * Math.log1p(this.exposure.get(r.cluster[i]));
+            }
+
+            return z;
+        });
+
+        // 4) random pick (softmax)
+        const max = Math.max(...adjusted);
+        const weights = adjusted.map((z) => Math.exp((z - max) / this.temperature));
+        const total = weights.reduce((a, b) => a + b, 0);
+
+        let u = this.rng() * total;
+        let pick = candidates.length - 1;
+        for (let j = 0; j < candidates.length; j++) {
+            u -= weights[j];
+            if (u <= 0) { pick = j; break; }
+        }
+
+        const chosen = candidates[pick];
 
         this.asked.add(r.cluster[chosen]);
         this.topicCounts[r.topicId[chosen]] += 1;
+        if (this.exposure) this.exposure.record(r.cluster[chosen]);
 
         const row = r.rows[chosen];
         const out = {
@@ -253,7 +318,7 @@ class Session {
             round: row.round,
             company: row.company,
             url: row.url,
-            score: scores[chosen]
+            score: this.base[chosen]
         };
 
         this.history.push(out);
@@ -262,4 +327,4 @@ class Session {
 }
 
 
-module.exports = { Recommender, Session, makeQuery, makeDoc };
+module.exports = { Recommender, Session, ExposureTracker, makeQuery, makeDoc };

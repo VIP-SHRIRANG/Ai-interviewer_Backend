@@ -79,10 +79,14 @@ class QuestionService {
     }
 
 
-    async generateQuestion(
-        questionNumber,
+    // Shared by the first and the following questions.
+    // - collects the question text
+    // - starts the audio for each sentence as soon as it is complete (in parallel)
+    // - sends the audio in order, while the text is announced without waiting for it
+    async _generate(
+        run,
         onAudio,
-        context = {}
+        onQuestionText
     ) {
 
         const sentenceBuffer =
@@ -90,32 +94,28 @@ class QuestionService {
 
         let completeQuestion = "";
 
+        let sendChain =
+            Promise.resolve();
 
-        await this.llmService.generateQuestion(
+        const queueSpeech = (sentence) => {
 
-            questionNumber,
-
-            async (token) => {
-
-                completeQuestion += token;
-
-
-                const sentence =
-                    sentenceBuffer.add(
-                        token
-                    );
-
-
-                if (!sentence) {
-                    return;
-                }
-
-
-                try {
-                    const audio =
-                        await this.ttsService.speak(
-                            sentence
+            // Synthesis starts now; delivery order is kept by the chain below
+            const job =
+                Promise.resolve()
+                    .then(() => this.ttsService.speak(sentence))
+                    .catch((error) => {
+                        console.error(
+                            "TTS synthesis warning:",
+                            error.message
                         );
+                        return null;
+                    });
+
+            sendChain =
+                sendChain.then(async () => {
+
+                    const audio =
+                        await job;
 
                     if (audio && onAudio) {
                         await onAudio(
@@ -123,46 +123,67 @@ class QuestionService {
                             sentence
                         );
                     }
-                } catch (error) {
+                }).catch((error) => {
                     console.error(
-                        "TTS synthesis warning:",
+                        "Audio delivery warning:",
                         error.message
                     );
-                }
-            },
+                });
+        };
 
-            context
-        );
+
+        await run(async (token) => {
+
+            completeQuestion += token;
+
+            const sentence =
+                sentenceBuffer.add(token);
+
+            if (sentence) {
+                queueSpeech(sentence);
+            }
+        });
 
 
         const remaining =
             sentenceBuffer.flush();
 
-
         if (remaining) {
-
-            try {
-                const audio =
-                    await this.ttsService.speak(
-                        remaining
-                    );
-
-                if (audio && onAudio) {
-                    await onAudio(
-                        audio,
-                        remaining
-                    );
-                }
-            } catch (error) {
-                console.error(
-                    "TTS flush warning:",
-                    error.message
-                );
-            }
+            queueSpeech(remaining);
         }
 
 
-        return completeQuestion.trim();
+        const question =
+            completeQuestion.trim();
+
+        // The text is final: let the caller show it before the audio finishes
+        if (onQuestionText) {
+            await onQuestionText(question);
+        }
+
+        await sendChain;
+
+        return question;
+    }
+
+
+    async generateQuestion(
+        questionNumber,
+        onAudio,
+        context = {},
+        onQuestionText = null
+    ) {
+
+        return this._generate(
+            (onToken) =>
+                this.llmService.generateQuestion(
+                    questionNumber,
+                    onToken,
+                    context
+                ),
+            onAudio,
+            onQuestionText
+        );
     }
 
 
@@ -171,89 +192,22 @@ class QuestionService {
         answer,
         questionNumber,
         onAudio,
-        context = {}
+        context = {},
+        onQuestionText = null
     ) {
 
-        const sentenceBuffer =
-            new SentenceBuffer();
-
-        let completeQuestion = "";
-
-
-        await this.llmService.generateNextQuestion(
-
-            question,
-            answer,
-            questionNumber,
-
-            async (token) => {
-
-                completeQuestion += token;
-
-
-                const sentence =
-                    sentenceBuffer.add(
-                        token
-                    );
-
-
-                if (!sentence) {
-                    return;
-                }
-
-
-                try {
-                    const audio =
-                        await this.ttsService.speak(
-                            sentence
-                        );
-
-                    if (audio && onAudio) {
-                        await onAudio(
-                            audio,
-                            sentence
-                        );
-                    }
-                } catch (error) {
-                    console.error(
-                        "TTS synthesis warning:",
-                        error.message
-                    );
-                }
-            },
-
-            context
+        return this._generate(
+            (onToken) =>
+                this.llmService.generateNextQuestion(
+                    question,
+                    answer,
+                    questionNumber,
+                    onToken,
+                    context
+                ),
+            onAudio,
+            onQuestionText
         );
-
-
-        const remaining =
-            sentenceBuffer.flush();
-
-
-        if (remaining) {
-
-            try {
-                const audio =
-                    await this.ttsService.speak(
-                        remaining
-                    );
-
-                if (audio && onAudio) {
-                    await onAudio(
-                        audio,
-                        remaining
-                    );
-                }
-            } catch (error) {
-                console.error(
-                    "TTS flush warning:",
-                    error.message
-                );
-            }
-        }
-
-
-        return completeQuestion.trim();
     }
 }
 

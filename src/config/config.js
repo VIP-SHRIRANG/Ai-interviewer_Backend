@@ -18,6 +18,11 @@ module.exports = {
     ],
 
     RECOMMENDER: {
+        POOL: Number(process.env.RECOMMENDER_POOL) || 80,
+        TEMPERATURE: Number(process.env.RECOMMENDER_TEMPERATURE) || 1.0,
+        TOPIC_PENALTY: Number(process.env.RECOMMENDER_TOPIC_PENALTY) || 0.8,
+        EXPOSURE_PENALTY: Number(process.env.RECOMMENDER_EXPOSURE_PENALTY) || 1.5,
+        EXPOSURE_HALF_LIFE_HOURS: Number(process.env.RECOMMENDER_EXPOSURE_HALF_LIFE_HOURS) || 6,
         ENABLED: process.env.USE_RECOMMENDER !== "false",
         ARTIFACTS_DIR: process.env.RECOMMENDER_DIR || "artifacts",
         POOLING: process.env.RECOMMENDER_POOLING || "mean",
