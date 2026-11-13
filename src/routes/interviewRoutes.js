@@ -61,6 +61,10 @@ function createInterviewRoutes(
         controller.downloadReport
     );
 
+    router.get(
+        "/:sessionId/status",
+        controller.getStatus
+    );
 
     router.get(
         "/:sessionId",

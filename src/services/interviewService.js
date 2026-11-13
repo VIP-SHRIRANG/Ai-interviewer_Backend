@@ -14,6 +14,11 @@ class InterviewService {
 
         this.evaluationService =
             evaluationService;
+
+        // sessionId -> promise chain. Evaluations for one session run
+        // one at a time, in the order the answers were submitted.
+        this.evalQueues =
+            new Map();
     }
 
 
@@ -65,7 +70,7 @@ class InterviewService {
 
             candidateName:
                 session.candidateName,
-            
+
             company:
                 session.company,
 
@@ -74,7 +79,7 @@ class InterviewService {
 
             round:
                 session.round,
-            
+
             topic:
                 session.topic,
 
@@ -93,11 +98,46 @@ class InterviewService {
     }
 
 
+    // Adds a job to the session's queue. The returned promise gives the job's
+    // own result, but the chain itself survives a failed job.
+    _enqueueEvaluation(
+        sessionId,
+        job
+    ) {
+
+        const previous =
+            this.evalQueues.get(sessionId) ||
+            Promise.resolve();
+
+        const run =
+            previous.then(job);
+
+        this.evalQueues.set(
+            sessionId,
+            run.catch(() => {})
+        );
+
+        return run;
+    }
+
+
+    // Resolves once every queued evaluation for the session has finished
+    waitForEvaluations(
+        sessionId
+    ) {
+
+        return this.evalQueues.get(sessionId) ||
+            Promise.resolve();
+    }
+
+
     async processAnswer(
         sessionId,
         answer,
         onAudio,
-        onFeedback
+        onFeedback,
+        onFinalizing,
+        onQuestion
     ) {
 
         const session =
@@ -123,62 +163,240 @@ class InterviewService {
         }
 
 
-        const previousQuestion =
+        if (session.status === "finalizing") {
+
+            throw new Error(
+                "Interview is already being finalized"
+            );
+        }
+
+
+        // Details of the question being answered (captured now,
+        // because the session moves on before the evaluation finishes)
+        const question =
             session.currentQuestion;
 
-        const previousDifficulty =
+        const questionNumber =
+            session.questionNumber;
+
+        const difficulty =
             session.difficulty;
 
-
-        // =================================
-        // 1. Evaluate candidate answer
-        // =================================
-
-        const evaluation =
-            await this.evaluationService
-                .evaluateAnswer(
-                    previousQuestion,
-                    answer,
-                    {
-                        topic: session.topic,
-                        difficulty: previousDifficulty,
-                        questionNumber: session.questionNumber
-                    }
-                );
+        const isLastQuestion =
+            questionNumber >= session.maxQuestions;
 
 
         // =================================
-        // 2. Store answer + evaluation
+        // 1. Queue the evaluation (runs in the background)
         // =================================
 
-        this.interviewSession
-            .addAnswer(
+        session.pendingEvaluations =
+            (session.pendingEvaluations || 0) + 1;
+
+        const evaluationJob =
+            this._enqueueEvaluation(
                 sessionId,
-                answer,
-                evaluation
+                async () => {
+
+                    const startedAt =
+                        Date.now();
+
+                    try {
+
+                        const evaluation =
+                            await this.evaluationService
+                                .evaluateAnswer(
+                                    question,
+                                    answer,
+                                    {
+                                        topic: session.topic,
+                                        difficulty,
+                                        questionNumber
+                                    }
+                                );
+
+                        this.interviewSession
+                            .addAnswer(
+                                sessionId,
+                                answer,
+                                evaluation,
+                                {
+                                    questionNumber,
+                                    question,
+                                    difficulty
+                                }
+                            );
+
+                        // Adaptive difficulty applies to later questions
+                        if (!isLastQuestion && evaluation?.nextDifficulty) {
+
+                            this.interviewSession
+                                .setDifficulty(
+                                    sessionId,
+                                    evaluation.nextDifficulty
+                                );
+                        }
+
+                        console.log(
+                            `[timing] evaluation of question ${questionNumber} took ${Date.now() - startedAt} ms`
+                        );
+
+                        return evaluation;
+
+                    } finally {
+
+                        session.pendingEvaluations =
+                            Math.max(0, session.pendingEvaluations - 1);
+                    }
+                }
             );
 
+        // Marks the promise as handled so a failure can't crash the process
+        evaluationJob.catch((error) => {
+
+            console.error(
+                "Background evaluation failed:",
+                error.message
+            );
+        });
+
 
         // =================================
-        // 3. Stream evaluation feedback to client
+        // 2. Not the last question -> fire the next one immediately
         // =================================
 
-        if (onFeedback) {
+        if (!isLastQuestion) {
 
-            onFeedback({
-                ...evaluation,
-                questionNumber: session.questionNumber,
-                previousDifficulty,
-                averageScore: session.averageScore
-            });
+            const lastEvaluated =
+                session.history[session.history.length - 1];
+
+            let questionRegistered = false;
+
+            const startedAt =
+                Date.now();
+
+            const nextQuestion =
+                await this.questionService
+                    .generateNextQuestion(
+                        question,
+                        answer,
+                        questionNumber + 1,
+                        onAudio,
+                        {
+                            topic: session.topic,
+                            difficulty: session.difficulty,
+                            company: session.company,
+                            role: session.role,
+                            round: session.round,
+                            previousQuestions: [...session.askedQuestions],
+                            missingConcepts: lastEvaluated?.missingConcepts || []
+                        },
+                        async (text) => {
+
+                            // Register and announce the question as soon as its text exists
+                            this.interviewSession
+                                .setQuestion(
+                                    sessionId,
+                                    text
+                                );
+
+                            questionRegistered = true;
+
+                            console.log(
+                                `[timing] next question text ready after ${Date.now() - startedAt} ms`
+                            );
+
+                            if (onQuestion) {
+
+                                onQuestion({
+                                    question: text,
+                                    questionNumber: session.questionNumber,
+                                    maxQuestions: session.maxQuestions,
+                                    difficulty: session.difficulty,
+                                    averageScore: session.averageScore,
+                                    pendingEvaluations: session.pendingEvaluations
+                                });
+                            }
+                        }
+                    );
+
+            // Fallback for a questionService that does not call the callback
+            if (!questionRegistered) {
+
+                this.interviewSession
+                    .setQuestion(
+                        sessionId,
+                        nextQuestion
+                    );
+            }
+
+            console.log(
+                `[timing] next question fully delivered (with audio) after ${Date.now() - startedAt} ms`
+            );
+
+            return {
+
+                sessionId,
+
+                completed: false,
+
+                status: session.status,
+
+                topic: session.topic,
+
+                difficulty: session.difficulty,
+
+                question:
+                    nextQuestion,
+
+                questionNumber:
+                    session.questionNumber,
+
+                maxQuestions:
+                    session.maxQuestions,
+
+                averageScore:
+                    session.averageScore,
+
+                pendingEvaluations:
+                    session.pendingEvaluations
+            };
         }
 
 
         // =================================
-        // 4. Check if L1 interview reached maxQuestions
+        // 3. Last question -> wait for the whole queue, then build the report
+        //    (this is where the waiting time of earlier answers stacks up)
         // =================================
 
-        if (session.questionNumber >= session.maxQuestions) {
+        session.status =
+            "finalizing";
+
+        if (onFinalizing) {
+
+            onFinalizing({
+                pendingEvaluations: session.pendingEvaluations
+            });
+        }
+
+        try {
+
+            const finalizingStartedAt =
+                Date.now();
+
+            // The queue is sequential, so this resolves after every earlier job
+            const evaluation =
+                await evaluationJob;
+
+            if (onFeedback) {
+
+                onFeedback({
+                    ...evaluation,
+                    questionNumber,
+                    previousDifficulty: difficulty,
+                    averageScore: session.averageScore
+                });
+            }
 
             const summary =
                 await this.evaluationService
@@ -190,7 +408,18 @@ class InterviewService {
                     summary
                 );
 
-            if (onAudio && summary?.overallFeedback) {
+            console.log(
+                `[timing] report ready ${Date.now() - finalizingStartedAt} ms after the last answer`
+            );
+
+            // Speaking the summary adds TTS time before the report appears.
+            // Set SPEAK_SUMMARY=true in .env to enable it.
+            if (
+                process.env.SPEAK_SUMMARY === "true" &&
+                onAudio &&
+                summary?.overallFeedback
+            ) {
+
                 await this.questionService.speakText(
                     summary.overallFeedback,
                     onAudio
@@ -207,83 +436,15 @@ class InterviewService {
                 evaluation,
                 summary
             };
+
+        } catch (error) {
+
+            // Let the user retry or use "Finish Interview"
+            session.status =
+                "active";
+
+            throw error;
         }
-
-
-        // =================================
-        // 5. Update adaptive difficulty & generate next question
-        // =================================
-
-        const nextDifficulty =
-            evaluation.nextDifficulty || previousDifficulty;
-
-        this.interviewSession
-            .setDifficulty(
-                sessionId,
-                nextDifficulty
-            );
-
-        const nextQuestionNumber =
-            session.questionNumber + 1;
-
-        const previousQuestions =
-            session.history.map(item => item.question);
-
-        const nextQuestion =
-            await this.questionService
-                .generateNextQuestion(
-                    previousQuestion,
-                    answer,
-                    nextQuestionNumber,
-                    onAudio,
-                    {
-                        topic: session.topic,
-                        difficulty: nextDifficulty,
-                        company: session.company,
-                        role: session.role,
-                        round: session.round,
-                        previousQuestions,
-                        missingConcepts: evaluation.missingConcepts
-                    }
-                );
-
-
-        this.interviewSession
-            .setQuestion(
-                sessionId,
-                nextQuestion
-            );
-
-
-        return {
-
-            sessionId,
-
-            completed: false,
-
-            status: session.status,
-
-            topic: session.topic,
-
-            difficulty: session.difficulty,
-
-            question:
-                nextQuestion,
-
-            questionNumber:
-                session.questionNumber,
-
-            maxQuestions:
-                session.maxQuestions,
-
-            averageScore:
-                session.averageScore,
-
-            evaluation,
-
-            feedback:
-                evaluation.feedback
-        };
     }
 
 
@@ -306,6 +467,9 @@ class InterviewService {
             return session;
         }
 
+        // Make sure background evaluations are included in the summary
+        await this.waitForEvaluations(sessionId);
+
         const summary =
             await this.evaluationService
                 .generateSummary(session);
@@ -315,6 +479,57 @@ class InterviewService {
                 sessionId,
                 summary
             );
+    }
+
+
+    // Lightweight status for the frontend to poll
+    getStatus(
+        sessionId,
+        since = 0
+    ) {
+
+        const session =
+            this.getSession(sessionId);
+
+        const sinceNumber =
+            Number(since) || 0;
+
+        return {
+
+            sessionId,
+
+            status:
+                session.status,
+
+            questionNumber:
+                session.questionNumber,
+
+            maxQuestions:
+                session.maxQuestions,
+
+            pendingEvaluations:
+                session.pendingEvaluations || 0,
+
+            averageScore:
+                session.averageScore,
+
+            evaluations:
+                session.history
+                    .filter(item => item.questionNumber > sinceNumber)
+                    .map(item => ({
+                        questionNumber: item.questionNumber,
+                        difficulty: item.difficulty,
+                        score: item.score,
+                        feedback: item.feedback,
+                        strengths: item.strengths,
+                        missingConcepts: item.missingConcepts
+                    })),
+
+            summary:
+                session.status === "completed"
+                    ? session.overallSummary
+                    : null
+        };
     }
 
 

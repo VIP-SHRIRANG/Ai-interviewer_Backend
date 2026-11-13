@@ -88,6 +88,13 @@ class OllamaProvider {
             stream: false
         };
 
+        payload.keep_alive = "30m";
+        payload.options = {
+            temperature: 0.2,
+            num_predict: options.maxTokens ?? 500
+        };
+
+        
         if (options.format === "json") {
             payload.format = "json";
         }

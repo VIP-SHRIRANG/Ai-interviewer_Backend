@@ -77,6 +77,10 @@ class InterviewSession {
 
             currentQuestion: null,
 
+            askedQuestions: [],
+
+            pendingEvaluations: 0,
+
             history: [],
 
             averageScore: 0,
@@ -138,6 +142,10 @@ class InterviewSession {
 
         session.currentQuestion =
             question;
+
+        session.askedQuestions.push(
+            question
+        );
     }
 
 
@@ -166,10 +174,13 @@ class InterviewSession {
     }
 
 
+    // `meta` carries the details of the question being answered, because
+    // evaluations now finish after the session has moved on to the next one.
     addAnswer(
         sessionId,
         answer,
-        evaluation = null
+        evaluation = null,
+        meta = {}
     ) {
 
         const session =
@@ -187,13 +198,13 @@ class InterviewSession {
         const record = {
 
             questionNumber:
-                session.questionNumber,
+                meta.questionNumber ?? session.questionNumber,
 
             question:
-                session.currentQuestion,
+                meta.question ?? session.currentQuestion,
 
             difficulty:
-                session.difficulty,
+                meta.difficulty ?? session.difficulty,
 
             answer:
                 answer,

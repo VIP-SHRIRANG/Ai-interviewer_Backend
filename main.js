@@ -123,6 +123,11 @@ const ollamaProvider =
         config.OLLAMA.MODEL
     );
 
+ollamaProvider
+    .generate("Reply with the word OK.", { maxTokens: 5 })
+    .then(() => console.log("Ollama model warmed up"))
+    .catch((e) => console.error("Ollama warm-up failed:", e.message));
+
 
 const edgeTtsProvider =
     new EdgeTtsProvider(
@@ -131,13 +136,17 @@ const edgeTtsProvider =
 
 const questionRecommender = config.RECOMMENDER.ENABLED
     ? new QuestionRecommenderService({
+
         artifactsDir: config.RECOMMENDER.ARTIFACTS_DIR,
         pooling: config.RECOMMENDER.POOLING,
-        defaults: {
-            company: config.RECOMMENDER.COMPANY,
-            role: config.RECOMMENDER.ROLE,
-            round: config.RECOMMENDER.ROUND
-        }
+        defaults: { company: config.RECOMMENDER.COMPANY, role: config.RECOMMENDER.ROLE, round: config.RECOMMENDER.ROUND },
+        sessionOptions: {
+            pool: config.RECOMMENDER.POOL,
+            temperature: config.RECOMMENDER.TEMPERATURE,
+            topicPenalty: config.RECOMMENDER.TOPIC_PENALTY,
+            exposurePenalty: config.RECOMMENDER.EXPOSURE_PENALTY
+        },
+        exposureHalfLifeHours: config.RECOMMENDER.EXPOSURE_HALF_LIFE_HOURS
     })
     : null;
 

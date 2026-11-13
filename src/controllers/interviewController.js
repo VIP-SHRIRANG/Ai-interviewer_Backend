@@ -20,22 +20,36 @@ class InterviewController {
             questionRecommender;
     }
 
-    //Adding getOptions handler
+
+    // Company / role lists for the setup dropdowns
     getOptions = async (req, res) => {
+
         try {
-            const opts = this.questionRecommender
-                ? await this.questionRecommender.options()
-                : {};
+
+            const opts =
+                this.questionRecommender
+                    ? await this.questionRecommender.options()
+                    : {};
 
             return res.status(200).json({
                 companies: opts.companies || [],
-                roles: config.RECOMMENDER.ROLES,
+                roles: config.RECOMMENDER?.ROLES || [],
                 rounds: opts.rounds || []
             });
+
         } catch (error) {
-            return res.status(500).json({ error: error.message });
+
+            console.error(
+                "Options error:",
+                error
+            );
+
+            return res.status(500).json({
+                error: error.message
+            });
         }
     };
+
 
     getTopics = (req, res) => {
 
@@ -62,6 +76,7 @@ class InterviewController {
                 candidateName
             } = req.body || {};
 
+
             res.setHeader(
                 "Content-Type",
                 "text/event-stream"
@@ -84,12 +99,13 @@ class InterviewController {
                 await this.interviewService
                     .startInterview(
                         {
-                            topic:role,
+                            // The role doubles as the topic for the LLM prompts
+                            topic: role,
                             company,
                             role,
                             round,
                             maxQuestions,
-                            candidateName   
+                            candidateName
                         },
                         async (audio, text) => {
 
@@ -118,6 +134,10 @@ class InterviewController {
                         result.interviewMode,
                     topic:
                         result.topic,
+                    company:
+                        result.company,
+                    role:
+                        result.role,
                     difficulty:
                         result.difficulty,
                     questionNumber:
@@ -209,11 +229,16 @@ class InterviewController {
             res.flushHeaders();
 
 
+            let questionSent = false;
+
+
             const result =
                 await this.interviewService
                     .processAnswer(
                         sessionId,
                         answer.trim(),
+
+                        // 1) audio chunks
                         async (audio, text) => {
 
                             res.write(
@@ -227,6 +252,8 @@ class InterviewController {
                                 })}\n\n`
                             );
                         },
+
+                        // 2) feedback (last answer only)
                         (evaluationPayload) => {
 
                             res.write(
@@ -234,6 +261,29 @@ class InterviewController {
                                     type: "feedback",
                                     feedback: evaluationPayload.feedback,
                                     evaluation: evaluationPayload
+                                })}\n\n`
+                            );
+                        },
+
+                        // 3) the last answer was submitted
+                        () => {
+
+                            res.write(
+                                `data: ${JSON.stringify({
+                                    type: "finalizing"
+                                })}\n\n`
+                            );
+                        },
+
+                        // 4) the next question's text is ready (sent before its audio finishes)
+                        (questionPayload) => {
+
+                            questionSent = true;
+
+                            res.write(
+                                `data: ${JSON.stringify({
+                                    type: "question",
+                                    ...questionPayload
                                 })}\n\n`
                             );
                         }
@@ -251,8 +301,9 @@ class InterviewController {
                     })}\n\n`
                 );
 
-            } else {
+            } else if (!questionSent) {
 
+                // Fallback: the early question event was not sent
                 res.write(
                     `data: ${JSON.stringify({
                         type: "question",
@@ -265,7 +316,9 @@ class InterviewController {
                         difficulty:
                             result.difficulty,
                         averageScore:
-                            result.averageScore
+                            result.averageScore,
+                        pendingEvaluations:
+                            result.pendingEvaluations
                     })}\n\n`
                 );
             }
@@ -363,6 +416,29 @@ class InterviewController {
                     .getSession(req.params.sessionId);
 
             return res.status(200).json(session);
+
+        } catch (error) {
+
+            return res.status(404).json({
+                error: error.message
+            });
+        }
+    };
+
+
+    // Polled by the frontend for background evaluation results
+    getStatus = (req, res) => {
+
+        try {
+
+            const status =
+                this.interviewService
+                    .getStatus(
+                        req.params.sessionId,
+                        req.query.since
+                    );
+
+            return res.status(200).json(status);
 
         } catch (error) {
 
