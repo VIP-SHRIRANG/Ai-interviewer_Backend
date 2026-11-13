@@ -185,31 +185,40 @@ Rules:
         const topic =
             context.topic || "JavaScript";
 
+        const ideal =
+            context.idealAnswer ? String(context.idealAnswer).trim() : "";
+
+        const reference = ideal
+            ? `Reference (ideal) answer:\n${ideal}\n\nUse the reference answer as the standard. Judge whether the candidate's answer covers its key points correctly. The candidate spoke the answer, so informal wording, filler words and a different structure are fine, and another correct explanation is acceptable even if it uses different wording or examples. Give no credit for a point that is missing or wrong, and do not penalise a correct answer for being shorter than the reference.`
+            : `No reference answer is available. Judge the answer on technical correctness and completeness for this question.`;
+
         const currentDifficulty =
             context.difficulty || "easy";
 
         const prompt = `
-You are an expert technical interviewer evaluating a candidate's spoken answer in an L1 (Fundamental) interview.
+You are an expert technical interviewer evaluating a candidate's spoken answer.
 
 Topic: ${topic}
-Question Difficulty: ${currentDifficulty}
 Question: ${question}
-Candidate's Answer: ${answer}
 
-Evaluate the answer fairly for a spoken technical interview and respond ONLY with a valid JSON object matching this exact schema:
+${reference}
+
+Candidate's answer: ${answer}
+
+Scoring guide:
+- 9-10: covers all key points correctly
+- 7-8: covers most key points, minor gaps
+- 5-6: partly correct, important points missing
+- 3-4: vague, mostly incomplete, or contains errors
+- 1-2: wrong, off-topic, or no real answer
+
+Respond ONLY with a valid JSON object matching this schema:
 {
   "score": <integer from 1 to 10>,
-  "strengths": ["<point 1>", "<point 2>"],
-  "missingConcepts": ["<missing concept 1>", "<missing concept 2>"],
-  "feedback": "<1-2 concise sentences of constructive feedback addressed to the candidate>",
-  "spokenTransition": "<1 short, encouraging spoken sentence acknowledging the answer before moving on>",
-  "nextDifficulty": "<easy | medium | hard>"
+  "strengths": ["<what the candidate got right>"],
+  "missingConcepts": ["<key points from the reference the candidate missed>"],
+  "feedback": "<1-2 constructive sentences addressed to the candidate>"
 }
-
-Difficulty adaptation rules:
-- If score >= 8, increase nextDifficulty (easy -> medium, medium -> hard, hard -> hard).
-- If score <= 4, decrease nextDifficulty (hard -> medium, medium -> easy, easy -> easy).
-- Otherwise, keep nextDifficulty at "${currentDifficulty}".
 `.trim();
 
         return await this.llmProvider.generate(

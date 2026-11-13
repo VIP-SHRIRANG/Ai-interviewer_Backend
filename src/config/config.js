@@ -10,6 +10,18 @@ module.exports = {
         VOICE: process.env.TTS_VOICE || "en-US-AriaNeural"
     },
 
+    DB: { PATH: process.env.DB_PATH || "data/interviews.db" },
+
+    EVALUATION: {
+        IDEAL_ANSWERS_CSV: process.env.IDEAL_ANSWERS_CSV || "artifacts/questions_with_answers.clean.csv",
+        RUN_WORKER: process.env.RUN_WORKER !== "false",
+        POLL_MS: Number(process.env.EVAL_POLL_MS) || 2000,
+        MAX_ATTEMPTS: Number(process.env.EVAL_MAX_ATTEMPTS) || 3,
+        LEASE_MS: Number(process.env.EVAL_LEASE_MS) || 300000,
+        BACKOFF_MS: Number(process.env.EVAL_BACKOFF_MS) || 30000,
+        RETENTION_DAYS: Number(process.env.RETENTION_DAYS) || 30
+    },
+    
     //Added roles
     ROLES: [
         "Backend Developer", "Frontend Developer", "Full Stack Developer",

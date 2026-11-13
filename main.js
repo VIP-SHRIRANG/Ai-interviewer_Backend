@@ -4,6 +4,10 @@ const express =
 const path =
     require("path");
 
+const SessionStore = require("./src/db/sessionStore");
+const IdealAnswerBank = require("./src/services/idealAnswerBank");
+const EvaluationWorker = require("./src/services/evaluationWorker");
+
 const cors =
     require("cors");
 
@@ -51,14 +55,9 @@ const EvaluationService =
         "./src/services/evaluationService"
     );
 
-const InterviewService =
+const { InterviewService } =
     require(
         "./src/services/interviewService"
-    );
-
-const InterviewSession =
-    require(
-        "./src/services/interviewSession"
     );
 
 const ReportService =
@@ -133,6 +132,10 @@ const edgeTtsProvider =
     new EdgeTtsProvider(
         config.TTS.VOICE
     );
+    
+    const store = new SessionStore(config.DB.PATH);
+    
+    const idealAnswers = new IdealAnswerBank(config.EVALUATION.IDEAL_ANSWERS_CSV);
 
 const questionRecommender = config.RECOMMENDER.ENABLED
     ? new QuestionRecommenderService({
@@ -163,12 +166,6 @@ const ttsService =
     );
 
 
-const questionService =
-    new QuestionService(
-        llmService,
-        ttsService
-    );
-
 
 const evaluationService =
     new EvaluationService(
@@ -176,20 +173,35 @@ const evaluationService =
     );
 
 
-const interviewSession =
-    new InterviewSession();
+const questionService =
+    new QuestionService(
+        llmService,
+        ttsService
+    );
+
+
+const evaluationWorker = new EvaluationWorker({
+    store,
+    evaluationService,
+    pollMs: config.EVALUATION.POLL_MS,
+    maxAttempts: config.EVALUATION.MAX_ATTEMPTS,
+    leaseMs: config.EVALUATION.LEASE_MS,
+    backoffMs: config.EVALUATION.BACKOFF_MS
+});
+
+
+const interviewService = new InterviewService(questionService, store, idealAnswers, {
+    limits: {
+        min: config.L1.MIN_QUESTIONS,
+        max: config.L1.MAX_QUESTIONS_LIMIT,
+        default: config.L1.DEFAULT_MAX_QUESTIONS
+    },
+    onQueued: () => evaluationWorker.notify()
+});
 
 
 const reportService =
     new ReportService();
-
-
-const interviewService =
-    new InterviewService(
-        questionService,
-        interviewSession,
-        evaluationService
-    );
 
 
 const interviewController =
@@ -225,8 +237,18 @@ app.use(
 // ==========================================
 
 if (require.main === module) {
+    if (config.EVALUATION.RUN_WORKER) evaluationWorker.start();
+
+    setInterval(() => store.deleteOlderThan(config.EVALUATION.RETENTION_DAYS), 6 * 60 * 60 * 1000);
+
+    process.on("SIGINT", async () => {
+        await evaluationWorker.stop();
+        store.close();
+        process.exit(0);
+    });
 
     app.listen(
+        
         config.PORT,
         () => {
 
@@ -242,7 +264,6 @@ if (require.main === module) {
 module.exports = {
     app,
     interviewService,
-    interviewSession,
     evaluationService,
     reportService
 };
