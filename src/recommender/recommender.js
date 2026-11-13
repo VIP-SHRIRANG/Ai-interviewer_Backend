@@ -327,4 +327,4 @@ class Session {
 }
 
 
-module.exports = { Recommender, Session, ExposureTracker, makeQuery, makeDoc };
+module.exports = { Recommender, Session, ExposureTracker, makeQuery, makeDoc };0 

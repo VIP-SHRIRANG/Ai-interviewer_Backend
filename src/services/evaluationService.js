@@ -36,9 +36,21 @@ class EvaluationService {
                 if (parsed) {
                     return parsed;
                 }
+                
+                if (parsed) {
+                    return parsed;
+                }
+
+                if (context.strict) {
+                    throw new Error("The evaluator returned an invalid response");
+                }
 
             } catch (error) {
-
+                
+                if (context.strict) {
+                    throw error;
+                }
+                
                 console.error(
                     "LLM evaluation error, falling back to heuristic evaluation:",
                     error.message

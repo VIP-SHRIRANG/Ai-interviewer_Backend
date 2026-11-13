@@ -1,557 +1,302 @@
+class ServiceError extends Error {
+
+    constructor(message, status = 400) {
+
+        super(message);
+        this.status = status;
+    }
+}
+
+
+/**
+ * Runs the interview itself: asks questions and saves the answers.
+ * Nothing is evaluated here. When the last answer arrives, the interview is
+ * put in the evaluation queue and the EvaluationWorker takes it from there.
+ */
 class InterviewService {
 
     constructor(
         questionService,
-        interviewSession,
-        evaluationService
+        store,
+        idealAnswers,
+        {
+            limits = { min: 1, max: 15, default: 5 },
+            onQueued = null
+        } = {}
     ) {
 
-        this.questionService =
-            questionService;
-
-        this.interviewSession =
-            interviewSession;
-
-        this.evaluationService =
-            evaluationService;
-
-        // sessionId -> promise chain. Evaluations for one session run
-        // one at a time, in the order the answers were submitted.
-        this.evalQueues =
-            new Map();
+        this.questionService = questionService;
+        this.store = store;
+        this.idealAnswers = idealAnswers;
+        this.limits = limits;
+        this.onQueued = onQueued;   // e.g. () => worker.notify()
     }
 
 
-    async startInterview(
-        options = {},
-        onAudio = null
-    ) {
+    _clampMax(value) {
 
-        // Support legacy signature startInterview(onAudio)
-        if (typeof options === "function") {
-            onAudio = options;
-            options = {};
+        const n = Math.round(Number(value));
+
+        if (!Number.isFinite(n) || n < this.limits.min) return this.limits.default;
+        return Math.min(this.limits.max, n);
+    }
+
+
+    // The session must exist and belong to this candidate ("not found" hides other people's sessions)
+    _ownedSession(sessionId, candidateId) {
+
+        const row = this.store.getSessionRow(sessionId);
+
+        if (!row || row.candidate_id !== String(candidateId)) {
+            throw new ServiceError("Interview session not found", 404);
         }
 
-        const session =
-            this.interviewSession
-                .createSession(options);
+        return row;
+    }
 
 
-        const question =
-            await this.questionService
-                .generateQuestion(
-                    1,
-                    onAudio,
-                    {
-                        topic: session.topic,
-                        difficulty: session.difficulty,
-                        company: session.company,
-                        role: session.role,
-                        round: session.round
-                    }
-                );
+    // Called by the controller BEFORE it opens the event stream, so mistakes get a proper HTTP status
+    assertCanAnswer(sessionId, candidateId) {
+
+        const row = this._ownedSession(sessionId, candidateId);
+
+        if (row.status !== "in_progress") {
+            throw new ServiceError("This interview was already submitted", 409);
+        }
+
+        return row;
+    }
 
 
-        this.interviewSession
-            .setQuestion(
-                session.sessionId,
-                question
-            );
-
+    _questionContext(row, previousQuestions) {
 
         return {
-
-            sessionId:
-                session.sessionId,
-
-            interviewMode:
-                session.interviewMode,
-
-            candidateName:
-                session.candidateName,
-
-            company:
-                session.company,
-
-            role:
-                session.role,
-
-            round:
-                session.round,
-
-            topic:
-                session.topic,
-
-            difficulty:
-                session.difficulty,
-
-            maxQuestions:
-                session.maxQuestions,
-
-            question:
-                question,
-
-            questionNumber:
-                session.questionNumber
+            topic: row.role,
+            difficulty: "medium",
+            company: row.company,
+            role: row.role,
+            round: row.round,
+            previousQuestions,
+            missingConcepts: []
         };
     }
 
 
-    // Adds a job to the session's queue. The returned promise gives the job's
-    // own result, but the chain itself survives a failed job.
-    _enqueueEvaluation(
-        sessionId,
-        job
-    ) {
+    // Saves the question (with its ideal answer) and tells the caller as soon as its text is known
+    _registerQuestion(sessionId, number, text, onQuestion, extra = {}) {
 
-        const previous =
-            this.evalQueues.get(sessionId) ||
-            Promise.resolve();
-
-        const run =
-            previous.then(job);
-
-        this.evalQueues.set(
+        this.store.addQuestion({
             sessionId,
-            run.catch(() => {})
-        );
-
-        return run;
-    }
-
-
-    // Resolves once every queued evaluation for the session has finished
-    waitForEvaluations(
-        sessionId
-    ) {
-
-        return this.evalQueues.get(sessionId) ||
-            Promise.resolve();
-    }
-
-
-    async processAnswer(
-        sessionId,
-        answer,
-        onAudio,
-        onFeedback,
-        onFinalizing,
-        onQuestion
-    ) {
-
-        const session =
-            this.interviewSession
-                .getSession(
-                    sessionId
-                );
-
-
-        if (!session) {
-
-            throw new Error(
-                "Interview session not found"
-            );
-        }
-
-
-        if (session.status === "completed") {
-
-            throw new Error(
-                "Interview session is already completed"
-            );
-        }
-
-
-        if (session.status === "finalizing") {
-
-            throw new Error(
-                "Interview is already being finalized"
-            );
-        }
-
-
-        // Details of the question being answered (captured now,
-        // because the session moves on before the evaluation finishes)
-        const question =
-            session.currentQuestion;
-
-        const questionNumber =
-            session.questionNumber;
-
-        const difficulty =
-            session.difficulty;
-
-        const isLastQuestion =
-            questionNumber >= session.maxQuestions;
-
-
-        // =================================
-        // 1. Queue the evaluation (runs in the background)
-        // =================================
-
-        session.pendingEvaluations =
-            (session.pendingEvaluations || 0) + 1;
-
-        const evaluationJob =
-            this._enqueueEvaluation(
-                sessionId,
-                async () => {
-
-                    const startedAt =
-                        Date.now();
-
-                    try {
-
-                        const evaluation =
-                            await this.evaluationService
-                                .evaluateAnswer(
-                                    question,
-                                    answer,
-                                    {
-                                        topic: session.topic,
-                                        difficulty,
-                                        questionNumber
-                                    }
-                                );
-
-                        this.interviewSession
-                            .addAnswer(
-                                sessionId,
-                                answer,
-                                evaluation,
-                                {
-                                    questionNumber,
-                                    question,
-                                    difficulty
-                                }
-                            );
-
-                        // Adaptive difficulty applies to later questions
-                        if (!isLastQuestion && evaluation?.nextDifficulty) {
-
-                            this.interviewSession
-                                .setDifficulty(
-                                    sessionId,
-                                    evaluation.nextDifficulty
-                                );
-                        }
-
-                        console.log(
-                            `[timing] evaluation of question ${questionNumber} took ${Date.now() - startedAt} ms`
-                        );
-
-                        return evaluation;
-
-                    } finally {
-
-                        session.pendingEvaluations =
-                            Math.max(0, session.pendingEvaluations - 1);
-                    }
-                }
-            );
-
-        // Marks the promise as handled so a failure can't crash the process
-        evaluationJob.catch((error) => {
-
-            console.error(
-                "Background evaluation failed:",
-                error.message
-            );
+            number,
+            question: text,
+            idealAnswer: this.idealAnswers.get(text),
+            difficulty: "medium"
         });
 
+        if (onQuestion) {
 
-        // =================================
-        // 2. Not the last question -> fire the next one immediately
-        // =================================
+            const row = this.store.getSessionRow(sessionId);
 
-        if (!isLastQuestion) {
-
-            const lastEvaluated =
-                session.history[session.history.length - 1];
-
-            let questionRegistered = false;
-
-            const startedAt =
-                Date.now();
-
-            const nextQuestion =
-                await this.questionService
-                    .generateNextQuestion(
-                        question,
-                        answer,
-                        questionNumber + 1,
-                        onAudio,
-                        {
-                            topic: session.topic,
-                            difficulty: session.difficulty,
-                            company: session.company,
-                            role: session.role,
-                            round: session.round,
-                            previousQuestions: [...session.askedQuestions],
-                            missingConcepts: lastEvaluated?.missingConcepts || []
-                        },
-                        async (text) => {
-
-                            // Register and announce the question as soon as its text exists
-                            this.interviewSession
-                                .setQuestion(
-                                    sessionId,
-                                    text
-                                );
-
-                            questionRegistered = true;
-
-                            console.log(
-                                `[timing] next question text ready after ${Date.now() - startedAt} ms`
-                            );
-
-                            if (onQuestion) {
-
-                                onQuestion({
-                                    question: text,
-                                    questionNumber: session.questionNumber,
-                                    maxQuestions: session.maxQuestions,
-                                    difficulty: session.difficulty,
-                                    averageScore: session.averageScore,
-                                    pendingEvaluations: session.pendingEvaluations
-                                });
-                            }
-                        }
-                    );
-
-            // Fallback for a questionService that does not call the callback
-            if (!questionRegistered) {
-
-                this.interviewSession
-                    .setQuestion(
-                        sessionId,
-                        nextQuestion
-                    );
-            }
-
-            console.log(
-                `[timing] next question fully delivered (with audio) after ${Date.now() - startedAt} ms`
-            );
-
-            return {
-
+            onQuestion({
                 sessionId,
-
-                completed: false,
-
-                status: session.status,
-
-                topic: session.topic,
-
-                difficulty: session.difficulty,
-
-                question:
-                    nextQuestion,
-
-                questionNumber:
-                    session.questionNumber,
-
-                maxQuestions:
-                    session.maxQuestions,
-
-                averageScore:
-                    session.averageScore,
-
-                pendingEvaluations:
-                    session.pendingEvaluations
-            };
-        }
-
-
-        // =================================
-        // 3. Last question -> wait for the whole queue, then build the report
-        //    (this is where the waiting time of earlier answers stacks up)
-        // =================================
-
-        session.status =
-            "finalizing";
-
-        if (onFinalizing) {
-
-            onFinalizing({
-                pendingEvaluations: session.pendingEvaluations
+                question: text,
+                questionNumber: number,
+                maxQuestions: row.max_questions,
+                ...extra
             });
         }
+    }
+
+
+    async startInterview(options = {}, onAudio = null, onQuestion = null) {
+
+        if (!options.candidateId) {
+            throw new ServiceError("Not logged in", 401);
+        }
+
+        const sessionId = this.store.createSession({
+            candidateId: options.candidateId,
+            candidateName: options.candidateName || "Candidate",
+            company: options.company,
+            role: options.role,
+            round: options.round,
+            maxQuestions: this._clampMax(options.maxQuestions)
+        });
+
+        const row = this.store.getSessionRow(sessionId);
+
+        let registered = false;
 
         try {
 
-            const finalizingStartedAt =
-                Date.now();
+            const text = await this.questionService.generateQuestion(
+                1,
+                onAudio,
+                this._questionContext(row, []),
+                async (questionText) => {
 
-            // The queue is sequential, so this resolves after every earlier job
-            const evaluation =
-                await evaluationJob;
-
-            if (onFeedback) {
-
-                onFeedback({
-                    ...evaluation,
-                    questionNumber,
-                    previousDifficulty: difficulty,
-                    averageScore: session.averageScore
-                });
-            }
-
-            const summary =
-                await this.evaluationService
-                    .generateSummary(session);
-
-            this.interviewSession
-                .completeSession(
-                    sessionId,
-                    summary
-                );
-
-            console.log(
-                `[timing] report ready ${Date.now() - finalizingStartedAt} ms after the last answer`
+                    registered = true;
+                    this._registerQuestion(sessionId, 1, questionText, onQuestion, {
+                        company: row.company,
+                        role: row.role
+                    });
+                }
             );
 
-            // Speaking the summary adds TTS time before the report appears.
-            // Set SPEAK_SUMMARY=true in .env to enable it.
-            if (
-                process.env.SPEAK_SUMMARY === "true" &&
-                onAudio &&
-                summary?.overallFeedback
-            ) {
-
-                await this.questionService.speakText(
-                    summary.overallFeedback,
-                    onAudio
-                );
+            if (!registered) {
+                this._registerQuestion(sessionId, 1, text, onQuestion, {
+                    company: row.company,
+                    role: row.role
+                });
             }
 
             return {
                 sessionId,
-                completed: true,
-                status: "completed",
-                questionNumber: session.questionNumber,
-                maxQuestions: session.maxQuestions,
-                averageScore: session.averageScore,
-                evaluation,
-                summary
+                company: row.company,
+                role: row.role,
+                maxQuestions: row.max_questions,
+                question: text,
+                questionNumber: 1
             };
 
         } catch (error) {
 
-            // Let the user retry or use "Finish Interview"
-            session.status =
-                "active";
-
+            // Nothing useful was started, so do not leave an empty session on the dashboard
+            this.store.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(sessionId);
             throw error;
         }
     }
 
 
-    async finishInterview(
-        sessionId
-    ) {
+    async processAnswer(sessionId, candidateId, answer, onAudio = null, onQuestion = null) {
 
-        const session =
-            this.interviewSession
-                .getSession(sessionId);
+        const row = this.assertCanAnswer(sessionId, candidateId);
 
-        if (!session) {
+        const current = this.store.getCurrentQuestion(sessionId);
 
-            throw new Error(
-                "Interview session not found"
-            );
+        if (!current) {
+            throw new ServiceError("No question is waiting for an answer", 409);
         }
 
-        if (session.status === "completed" && session.overallSummary) {
-            return session;
+        const saved = this.store.saveAnswer(sessionId, current.question_number, answer);
+
+        if (!saved) {
+            throw new ServiceError("This question was already answered", 409);
         }
 
-        // Make sure background evaluations are included in the summary
-        await this.waitForEvaluations(sessionId);
+        // Last question: hand the whole interview to the evaluation queue
+        if (current.question_number >= row.max_questions) {
 
-        const summary =
-            await this.evaluationService
-                .generateSummary(session);
+            this.store.enqueue(sessionId);
+            if (this.onQueued) this.onQueued();
 
-        return this.interviewSession
-            .completeSession(
+            return {
                 sessionId,
-                summary
-            );
-    }
-
-
-    // Lightweight status for the frontend to poll
-    getStatus(
-        sessionId,
-        since = 0
-    ) {
-
-        const session =
-            this.getSession(sessionId);
-
-        const sinceNumber =
-            Number(since) || 0;
-
-        return {
-
-            sessionId,
-
-            status:
-                session.status,
-
-            questionNumber:
-                session.questionNumber,
-
-            maxQuestions:
-                session.maxQuestions,
-
-            pendingEvaluations:
-                session.pendingEvaluations || 0,
-
-            averageScore:
-                session.averageScore,
-
-            evaluations:
-                session.history
-                    .filter(item => item.questionNumber > sinceNumber)
-                    .map(item => ({
-                        questionNumber: item.questionNumber,
-                        difficulty: item.difficulty,
-                        score: item.score,
-                        feedback: item.feedback,
-                        strengths: item.strengths,
-                        missingConcepts: item.missingConcepts
-                    })),
-
-            summary:
-                session.status === "completed"
-                    ? session.overallSummary
-                    : null
-        };
-    }
-
-
-    getSession(
-        sessionId
-    ) {
-
-        const session =
-            this.interviewSession
-                .getSession(sessionId);
-
-        if (!session) {
-
-            throw new Error(
-                "Interview session not found"
-            );
+                submitted: true,
+                status: "under_evaluation",
+                questionsAnswered: current.question_number
+            };
         }
 
-        return session;
+        const nextNumber = current.question_number + 1;
+
+        let registered = false;
+
+        try {
+
+            const text = await this.questionService.generateNextQuestion(
+                current.question,
+                answer,
+                nextNumber,
+                onAudio,
+                this._questionContext(row, this.store.getAskedQuestions(sessionId)),
+                async (questionText) => {
+
+                    registered = true;
+                    this._registerQuestion(sessionId, nextNumber, questionText, onQuestion);
+                }
+            );
+
+            if (!registered) {
+                this._registerQuestion(sessionId, nextNumber, text, onQuestion);
+            }
+
+            return {
+                sessionId,
+                submitted: false,
+                question: text,
+                questionNumber: nextNumber,
+                maxQuestions: row.max_questions
+            };
+
+        } catch (error) {
+
+            // Let the candidate send the same answer again
+            if (!registered) this.store.clearAnswer(sessionId, current.question_number);
+            throw error;
+        }
+    }
+
+
+    // Submit early ("Finish Interview"): only answered questions are evaluated
+    finishInterview(sessionId, candidateId) {
+
+        this.assertCanAnswer(sessionId, candidateId);
+
+        if (this.store.countAnswered(sessionId) === 0) {
+            throw new ServiceError("Answer at least one question before finishing", 400);
+        }
+
+        this.store.enqueue(sessionId);
+        if (this.onQueued) this.onQueued();
+
+        return this.store.getPublic(sessionId);
+    }
+
+
+    // ------------------------------------------------------------------
+    // Dashboard
+    // ------------------------------------------------------------------
+
+    listSessions(candidateId) {
+
+        return this.store.listForCandidate(candidateId);
+    }
+
+
+    getSessionStatus(sessionId, candidateId) {
+
+        this._ownedSession(sessionId, candidateId);
+        return this.store.getPublic(sessionId);
+    }
+
+
+    // The data the PDF is built from; only available once evaluation has completed
+    getReportData(sessionId, candidateId) {
+
+        const row = this._ownedSession(sessionId, candidateId);
+
+        if (row.status !== "completed") {
+            throw new ServiceError("The report is not ready yet", 409);
+        }
+
+        return this.store.getSessionFull(sessionId);
+    }
+
+
+    retryEvaluation(sessionId, candidateId) {
+
+        this._ownedSession(sessionId, candidateId);
+
+        if (!this.store.retry(sessionId)) {
+            throw new ServiceError("Only a failed evaluation can be retried", 409);
+        }
+
+        if (this.onQueued) this.onQueued();
+
+        return this.store.getPublic(sessionId);
     }
 }
 
 
-module.exports =
-    InterviewService;
+module.exports = { InterviewService, ServiceError };
